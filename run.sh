@@ -16,7 +16,8 @@ compile
 
 #build/main data/simple/pair1/A.fasta data/simple/pair1/B.fasta # AGGTAB GXTXAYB # 4
 #build/main data/simple/pair2/A.fasta data/simple/pair2/B.fasta # ACTG ACTGA # 1
-build/main data/Enterobacteria_Phage_1/mutated_60_perc.fasta data/Enterobacteria_Phage_1/mutated_99_perc.fasta
+time build/main data/wfa_gpu/test_hifi.query.fasta data/wfa_gpu/test_hifi.target.fasta # 23
+#build/main data/Enterobacteria_Phage_1/mutated_60_perc.fasta data/Enterobacteria_Phage_1/mutated_70_perc.fasta
 
 # Profiling:
 #nsys nvprof --print-gpu-trace build/exec #summary, recommended to run like "run.sh > profiling.txt"
