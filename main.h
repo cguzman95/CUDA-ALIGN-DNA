@@ -10,48 +10,53 @@ char *read_sequence(const char *filename) {
     exit(0);
   }
 
-  // 1. Get file size
-  if (fseek(fp, 0, SEEK_END) != 0) {
-    fclose(fp);
-    exit(0);
-  }
-  long size = ftell(fp);
-  if (size == -1) {
-    fclose(fp);
-    exit(0);
-  }
-  if (fseek(fp, 0, SEEK_SET) != 0) {
-    fclose(fp);
-    exit(0);
-  }
+  char *line = NULL;
+  size_t linecap = 0;
+  ssize_t linelen;
 
-  // 2. Allocate + read
-  char *seq = (char *)malloc((size + 1) * sizeof(char));
+  size_t cap = 1024;
+  size_t len = 0;
+  char *seq = (char *)malloc(cap);
   if (!seq) {
     fclose(fp);
+    printf("error read_sequence !seq\n");
     exit(0);
   }
 
-  size_t got = fread(seq, 1, size, fp);
-  if (got != (size_t)size) {
-    free(seq);
-    fclose(fp);
-    exit(0);
-  }
-  seq[got] = '\0';
+  while ((linelen = getline(&line, &linecap, fp)) != -1) {
+    if (linelen == 0)
+      continue;
 
+    if (line[0] == '>') {
+      continue;
+    }
+
+    while (linelen > 0 &&
+           (line[linelen - 1] == '\n' || line[linelen - 1] == '\r')) {
+      line[--linelen] = '\0';
+    }
+
+    if (len + (size_t)linelen + 1 > cap) {
+      while (len + (size_t)linelen + 1 > cap)
+        cap *= 2;
+      char *tmp = (char *)realloc(seq, cap);
+      if (!tmp) {
+        free(seq);
+        free(line);
+        fclose(fp);
+        return NULL;
+      }
+      seq = tmp;
+    }
+
+    memcpy(seq + len, line, (size_t)linelen);
+    len += (size_t)linelen;
+  }
+
+  seq[len] = '\0';
+
+  free(line);
   fclose(fp);
-
-  // 3. Remove any trailing \n \r
-  size_t len = strlen(seq);
-  while (len > 0 && (seq[len - 1] == '\n' || seq[len - 1] == '\r')) {
-    seq[--len] = '\0';
-  }
-
-  if (!seq) {
-    fprintf(stderr, "Cannot read data/simple.txt\n");
-    exit(0);
-  }
 
   return seq;
 }
