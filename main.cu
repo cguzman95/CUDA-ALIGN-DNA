@@ -15,8 +15,7 @@ __device__ static int dmin3(int a, int b, int c) {
   return m < c ? m : c;
 }
 
-__global__ void d_edit_core(const char *a, const char *b, int *dp, int n,
-                            int m) {
+__global__ void d_edit_core(char *a, char *b, int *dp, int n, int m) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (tid == 0) {
@@ -35,10 +34,12 @@ int edit_distance(const char *a, const char *b) {
   int m = (int)strlen(b) + 1;
 
   int *ddp;
-  const char *da, *db;
+  char *da, *db;
   cudaMalloc(&ddp, n * m * sizeof(int));
   cudaMalloc(&da, n * sizeof(char));
   cudaMalloc(&db, m * sizeof(char));
+  cudaMemcpy(da, a, n * sizeof(char), cudaMemcpyHostToDevice);
+  cudaMemcpy(db, b, m * sizeof(char), cudaMemcpyHostToDevice);
 
   int *dp = (int *)malloc(n * m * sizeof(int));
   for (int i = 0; i < n; i++) {
@@ -53,14 +54,13 @@ int edit_distance(const char *a, const char *b) {
     dp[j] = j;
   int result;
 
-  /*
   cudaMemcpy(ddp, dp, n * m * sizeof(int), cudaMemcpyHostToDevice);
   cudaDeviceSynchronize();
   d_edit_core<<<1, 1>>>(da, db, ddp, n, m);
   cudaMemcpy(&result, &ddp[(n - 1) * m + (m - 1)], sizeof(int),
              cudaMemcpyDeviceToHost);
-*/
 
+  /*
   for (int i = 1; i < n; i++) {
     for (int j = 1; j < m; j++) {
       int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
@@ -68,8 +68,8 @@ int edit_distance(const char *a, const char *b) {
                            dp[(i - 1) * m + (j - 1)] + cost);
     }
   }
-
   result = dp[(n - 1) * m + (m - 1)];
+*/
 
   free(dp);
   return result;
