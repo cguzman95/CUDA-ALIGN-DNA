@@ -14,8 +14,8 @@ compile(){
 }
 compile
 
-build/main AGGTAB GXTXAYB # 4
-build/main ACTG ACTGA # 1
+build/main data/simple/pair1/A.txt data/simple/pair1/B.txt # AGGTAB GXTXAYB # 4
+build/main data/simple/pair2/A.txt data/simple/pair2/B.txt # ACTG ACTGA # 1
 
 # Profiling:
 #nsys nvprof --print-gpu-trace build/exec #summary, recommended to run like "run.sh > profiling.txt"

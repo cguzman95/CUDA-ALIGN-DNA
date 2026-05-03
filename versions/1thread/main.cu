@@ -1,7 +1,4 @@
-#include <cuda.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "main.h"
 
 #define T_BLOCK 1024
 
@@ -65,13 +62,8 @@ int edit_distance(const char *a, const char *b) {
 }
 
 int main(int argc, char *argv[]) {
-  if (argc != 3) {
-    fprintf(stderr, "Usage: %s SEQ1 SEQ2\n", argv[0]);
-    return 1;
-  }
-
-  const char *seq1 = argv[1];
-  const char *seq2 = argv[2];
+  char *seq1 = read_sequence(argv[1]);
+  char *seq2 = read_sequence(argv[2]);
 
   int dist = edit_distance(seq1, seq2);
   printf("Edit distance: %d\n", dist);
