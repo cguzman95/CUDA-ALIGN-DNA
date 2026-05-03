@@ -1,0 +1,5 @@
+Edit distance: 23
+
+real	0m33,518s
+user	0m33,131s
+sys	0m0,283s
