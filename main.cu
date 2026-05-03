@@ -1,132 +1,106 @@
-#include <math.h>
+#include <cuda.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Custom version of atomicMax for float, since Nvidia does not support an
-// official "atomicMax" function for floats
-static inline __device__ float atomicMax(float *addr, float val) {
-  unsigned int old = __float_as_uint(*addr), assumed;
-  do {
-    assumed = old;
-    if (__uint_as_float(old) >= val)
-      break;
+#define T_BLOCK 1024
 
-    old = atomicCAS((unsigned int *)addr, assumed, __float_as_uint(val));
-  } while (assumed != old);
-
-  return __uint_as_float(old);
+__device__ static int dmin3(int a, int b, int c) {
+  int m = a < b ? a : b;
+  return m < c ? m : c;
 }
 
-__global__ void dev_laplace_error(float *A, float *B, float *perror, int n,
-                                  int m) {
-  // Set indices
-  // Set to + 1 because computation starts at index 1
-  int i = blockIdx.x * blockDim.x + threadIdx.x + 1;
-  int j = blockIdx.y * blockDim.y + threadIdx.y + 1;
-
-  // To avoid exceeding boundaries:
-  if ((i >= m - 1) || (j >= n - 1))
-    return;
-
-  B[j * m + i] = (A[j * m + i + 1] + A[j * m + i - 1] + A[(j - 1) * m + i] +
-                  A[(j + 1) * m + i]) *
-                 0.25f;
-  float err = fabsf(A[j * m + i] - B[j * m + i]);
-  atomicMax(perror, err);
+__global__ void d_init_dpi(int *dp, int m) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  dp[i * m] = i;
 }
 
-void laplace_init(float *in, int n, int m) {
-  int i, j;
-  const float pi = 2.0f * asinf(1.0f);
-  memset(in, 0, n * m * sizeof(float));
-  for (i = 0; i < m; i++)
-    in[i] = 0.f;
-  for (i = 0; i < m; i++)
-    in[(n - 1) * m + i] = 0.f;
-  for (j = 0; j < n; j++)
-    in[j * m] = sinf(pi * j / (n - 1));
-  for (j = 0; j < n; j++)
-    in[j * m + m - 1] = sinf(pi * j / (n - 1)) * expf(-pi);
+__global__ void d_init_dpj(int *dp) {
+  int j = blockIdx.x * blockDim.x + threadIdx.x;
+  dp[j] = j;
 }
 
-int main(int argc, char **argv) {
-  int n = 4096, m = 4096;
-  int iter_max = 100, THREADS_BLOCK = 16;
-  float *A;
+__global__ void d_edit_core(const char *a, const char *b, int *dp, int n,
+                            int m) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-  const float tol = 1.0e-8f;
-  float error = 1.0f;
-
-  // get runtime arguments: n, m, iter_max and THREADS_BLOCK
-  if (argc > 1) {
-    n = atoi(argv[1]);
+  if (tid == 0) {
+    for (int i = 1; i < n; i++) {
+      for (int j = 1; j < m; j++) {
+        int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+        dp[i * m + j] = dmin3(dp[(i - 1) * m + j] + 1, dp[i * m + (j - 1)] + 1,
+                              dp[(i - 1) * m + (j - 1)] + cost);
+      }
+    }
   }
-  if (argc > 2) {
-    m = atoi(argv[2]);
-  }
-  if (argc > 3) {
-    iter_max = atoi(argv[3]);
-  }
-  if (argc > 4) {
-    THREADS_BLOCK = atoi(argv[4]);
-  }
+}
 
-  A = (float *)malloc(n * m * sizeof(float));
+int edit_distance(const char *a, const char *b) {
+  int n = (int)strlen(a) + 1;
+  int m = (int)strlen(b) + 1;
 
-  //  set boundary conditions
-  laplace_init(A, n, m);
-  A[(n / 128) * m + m / 128] = 1.0f; // set singular point
-
-  printf("Jacobi relaxation Calculation: %d x %d mesh,"
-         " maximum of %d iterations. Threads per block= %d\n",
-         n, m, iter_max, THREADS_BLOCK);
-
-  float *A_dev, *Anew_dev; // Device pointers
-
-  cudaMalloc(&A_dev, n * m * sizeof(float));
-  cudaMalloc(&Anew_dev, n * m * sizeof(float));
-
-  cudaMemcpy(A_dev, A, n * m * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(Anew_dev, A, n * m * sizeof(float), cudaMemcpyHostToDevice);
-
-  float *error_dev;
-  cudaMalloc(&error_dev, sizeof(float));
-
-  // Define grid and block dimensions
-
-  int n_matrix_to_compute = n - 2; // external matrix boundaries not processed
-  int m_matrix_to_compute = m - 2; // external matrix boundaries not processed
-  dim3 gridDim((n_matrix_to_compute + THREADS_BLOCK - 1) / THREADS_BLOCK,
-               (m_matrix_to_compute + THREADS_BLOCK - 1) / THREADS_BLOCK);
-  dim3 blockDim(THREADS_BLOCK, THREADS_BLOCK);
-
-  int iter = 0;
-  while (error > tol && iter < iter_max) {
-    iter++;
-
-    cudaMemset(error_dev, 0, sizeof(float));
-
-    dev_laplace_error<<<gridDim, blockDim>>>(A_dev, Anew_dev, error_dev, n, m);
-
-    cudaMemcpy(&error, error_dev, sizeof(float), cudaMemcpyDeviceToHost);
-
-    error = sqrtf(error);
-
-    float *swap = A_dev;
-    A_dev = Anew_dev;
-    Anew_dev = swap; // swap pointers A_dev & Anew_dev
-
-    if (iter % (iter_max / 10) == 0)
-      printf("%5d, %0.6f\n", iter, error);
+  int **dp = (int **)malloc(n * sizeof(int *));
+  for (int i = 0; i < n; i++) {
+    dp[i] = (int *)malloc(m * sizeof(int));
   }
 
-  cudaMemcpy(A, A_dev, n * m * sizeof(float), cudaMemcpyDeviceToHost);
+  int *ddp;
+  const char *da, *db;
+  cudaMalloc(&ddp, n * m * sizeof(int));
+  cudaMemset(ddp, 0, n * m * sizeof(int));
+  cudaMalloc(&da, n * sizeof(char));
+  cudaMalloc(&db, m * sizeof(char));
 
-  printf("Total Iterations: %5d, ERROR: %0.6f, ", iter, error);
-  printf("A[%d][%d]= %0.6f\n", n / 128, m / 128, A[(n / 128) * m + m / 128]);
+  /*
+  cudaMemcpy(ddp, dp, n * m * sizeof(int), cudaMemcpyHostToDevice);
+  cudaMemcpy(da, a, n * sizeof(char), cudaMemcpyHostToDevice);
+  cudaMemcpy(db, b, n * sizeof(char), cudaMemcpyHostToDevice);
+*/
+  int blocks;
+  blocks = (n + T_BLOCK - 1) / T_BLOCK;
+  d_init_dpi<<<blocks, T_BLOCK>>>(ddp, m);
+  blocks = (m + T_BLOCK - 1) / T_BLOCK;
+  d_init_dpj<<<blocks, T_BLOCK>>>(ddp);
+  cudaDeviceSynchronize();
+  d_edit_core<<<1, 1>>>(da, db, ddp, n, m);
 
-  cudaFree(A_dev);
-  cudaFree(Anew_dev);
-  free(A);
+  int result;
+  cudaMemcpy(&result, &ddp[(n - 1) * m + (m - 1)], sizeof(int),
+             cudaMemcpyDeviceToHost);
+
+  /*
+  for (int i = 0; i < n; i++)
+    dp[i][0] = i;
+  for (int j = 0; j < m; j++)
+    dp[0][j] = j;
+
+  for (int i = 1; i < n; i++) {
+    for (int j = 1; j < m; j++) {
+      int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+      dp[i][j] =
+          min3(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  int result = dp[n - 1][m - 1];
+  */
+
+  for (int i = 0; i < n; i++)
+    free(dp[i]);
+  free(dp);
+  return result;
+}
+
+int main(int argc, char *argv[]) {
+  if (argc != 3) {
+    fprintf(stderr, "Usage: %s SEQ1 SEQ2\n", argv[0]);
+    return 1;
+  }
+
+  const char *seq1 = argv[1];
+  const char *seq2 = argv[2];
+
+  int dist = edit_distance(seq1, seq2);
+  printf("Edit distance: %d\n", dist);
+
+  return 0;
 }
