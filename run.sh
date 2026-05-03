@@ -1,6 +1,8 @@
 #!/bin/bash
-#SBATCH -N 1 # number of nodes
-#SBATCH -n 1 # number of cores
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH --partition=cuda-ext.q
+#SBATCH --gres=gpu:GeForceRTX3080:1
 #SBATCH -o out.txt
 #SBATCH -e err.txt
 
